@@ -1,3 +1,33 @@
+/*
+
+Copyright (c) 2023 Eugenio Arteaga A.
+
+Permission is hereby granted, free of charge, to any 
+person obtaining a copy of this software and associated 
+documentation files (the "Software"), to deal in the 
+Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to 
+permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice 
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
+/************************ gsim **************************/
+
 #define SPXE_APPLICATION
 #include <spxe.h>
 #include <stdio.h>
@@ -9,9 +39,8 @@
 #define WIDTH 800
 #define HEIGHT 600
 #define SUBSCALE 2
-#define SUBSTEPS 1
 #define DUST_POOL_SIZE 100
-#define G 50.2F
+#define G 0.0667F
 #define MASS_MIN 1.0F
 #define MASS_MAX 1.0F
 
@@ -160,7 +189,7 @@ static void universe_free(struct universe* universe)
     }
 }
 
-static void universe_apply_gravity(const struct universe* universe)
+static void universe_apply_gravity(const struct universe* universe, const float g)
 {
     for (size_t i = 0; i < universe->count; ++i) {
         for (size_t j = 0; j < universe->count; ++j) {
@@ -168,10 +197,9 @@ static void universe_apply_gravity(const struct universe* universe)
                 const float dx = universe->positions[i].x - universe->positions[j].x;
                 const float dy = universe->positions[i].y - universe->positions[j].y;
                 const float sqr = dx * dx + dy * dy;
-                const float f = G * universe->sqradiuses[j] / sqr;
-                const float r = sqrtf(sqr);
-                universe->velocities[i].x -= f * dx / r;
-                universe->velocities[i].y -= f * dy / r;
+                const float f = g * universe->sqradiuses[j] / sqr;
+                universe->velocities[i].x -= f * dx;
+                universe->velocities[i].y -= f * dy;
             }
         }
     }
@@ -387,11 +415,37 @@ static Px* universe_background_create(const int total, const int prob)
     return bg;
 }
 
-static int gsim_error(const char* fmt, const char* exe, const char* arg)
+static int gsim_error(const char* fmt, const char* arg)
 {
-    fprintf(stderr, "%s: ", exe);
+    fprintf(stderr, "gsim: ");
     fprintf(stderr, fmt, arg);
+    fprintf(stderr, " See -help for more information.\n");
     return EXIT_FAILURE;
+}
+
+static int gsim_help(void)
+{
+    fprintf(stdout, "gsim usage:\n");
+    fprintf(stdout, "<uint>\t\t: Set number of bodies to simulate in the system.\n");
+    fprintf(stdout, "-g <float>\t: Set gravitational constant value.\n");
+    fprintf(stdout, "-w <uint>\t: Set width of the rendered simulation in pixels.\n");
+    fprintf(stdout, "-h <uint>\t: Set height of the rendered simulation in pixels.\n");
+    fprintf(stdout, "-help\t\t: Print information about usage of gsim.\n");
+    return EXIT_SUCCESS;
+}
+
+static void gsim_controls(void)
+{
+    fprintf(stdout, "gsim controls:\n");
+    fprintf(stdout, "Click and drag on the background to move around.\n");
+    fprintf(stdout, "Click and drag on the bodies of the simulation to move them.\n");
+    fprintf(stdout, "WASD: Move up, down, left and right.\n");
+    fprintf(stdout, "Z and X: Zoom in and out of the center of the screen.\n");
+    fprintf(stdout, "O and P: Increase and decrease the size of the time step.\n");
+    fprintf(stdout, "Space: Pause the time of the physics in the simulation.\n");
+    fprintf(stdout, "Left Shift: Switch the rendering of trails on and off.\n");
+    fprintf(stdout, "R: Restart the simulation.\n");
+    fprintf(stdout, "Escape: Quit.\n");
 }
 
 int main(const int argc, const char** argv)
@@ -400,48 +454,55 @@ int main(const int argc, const char** argv)
     struct universe universe;
     int i, count, width = WIDTH, height = HEIGHT;
     int gravity = 1, paused = 0, hover = -1, trail = 1;
-    float t, T, dT, dK = 1.0F, scale = 1.0F;
+    float t, T, dT, dK = 1.0F, scale = 1.0F, g = G;
     vec2 cam = {0.0F, 0.0F}, mouse = {0.0F, 0.0F};
     
     srand(time(NULL));
     count = rand() % 10 + 5;
     
     for (i = 1; i < argc; ++i) {
-        int *var = NULL;
-        if (!strcmp(argv[i], "-w")) {
-            var = &width;
+        int *inum = NULL;
+        float *fnum = NULL;
+        if (!strcmp(argv[i], "-help")) {
+            return gsim_help();
+        } else if (!strcmp(argv[i], "-w")) {
+            inum = &width;
         } else if (!strcmp(argv[i], "-h")) {
-            var = &height;
+            inum = &height;
+        } else if (!strcmp(argv[i], "-g")) {
+            fnum = &g;
         } else if (argv[i][0] >= '0' && argv[i][0] <= '9') {
             count = atoi(argv[i]);
         } else {
-            return gsim_error("illegal option '%s'\n", argv[0], argv[i]);
+            return gsim_error("illegal option '%s'.", argv[i]);
         }
 
-        if (var) {
-            if (i + 1 == argc) {
-                return gsim_error(
-                    "expected numeric argument afte '%s' option\n",
-                    argv[0],
-                    argv[i]
-                );
-            }
-            
-            *var = atoi(argv[i + 1]);
-            if (*var < 1) {
-                return gsim_error(
-                    "argument for option '%s' must be a non-zero unsigned integer\n",
-                    argv[0],
-                    argv[i]
-                );
-            }
-            ++i;
+        if (!inum && !fnum) {
+            continue;
         }
+
+        if (i + 1 == argc) {
+            return gsim_error("expected numeric argument after option '%s'.", argv[i]);
+        }
+        
+        if (inum) {
+            *inum = atoi(argv[i + 1]);
+            if (*inum < 1) {
+                 return gsim_error(
+                    "argument for option '%s' must be a non-zero unsigned integer.", 
+                    argv[i]
+                );
+            }
+        } else {
+            *fnum = atof(argv[i + 1]);
+        }
+        ++i;
     }
 
-    pixbuf = spxeStart("bodies", WIDTH, HEIGHT, width, height);
+    pixbuf = spxeStart("gsim", WIDTH, HEIGHT, width, height);
     universe = universe_create(count);
     sky = universe_background_create(1000, 2);
+    gsim_controls();
 
     t = spxeTime();
     while (spxeRun(pixbuf)) {
@@ -518,7 +579,7 @@ int main(const int argc, const char** argv)
 
         if (!paused) {
             if (gravity) {
-                universe_apply_gravity(&universe);
+                universe_apply_gravity(&universe, g);
             }
             universe_update(&universe, clicked ? hover : -1, dT * dK);
         }
@@ -531,3 +592,4 @@ int main(const int argc, const char** argv)
     universe_free(&universe);
     return spxeEnd(pixbuf);
 }
+
