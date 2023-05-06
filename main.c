@@ -387,14 +387,21 @@ static Px* universe_background_create(const int total, const int prob)
     return bg;
 }
 
+static int gsim_error(const char* fmt, const char* exe, const char* arg)
+{
+    fprintf(stderr, "%s: ", exe);
+    fprintf(stderr, fmt, arg);
+    return EXIT_FAILURE;
+}
+
 int main(const int argc, const char** argv)
 {
-    vec2 cam, mouse;
     Px* pixbuf, *sky;
     struct universe universe;
     int i, count, width = WIDTH, height = HEIGHT;
     int gravity = 1, paused = 0, hover = -1, trail = 1;
     float t, T, dT, dK = 1.0F, scale = 1.0F;
+    vec2 cam = {0.0F, 0.0F}, mouse = {0.0F, 0.0F};
     
     srand(time(NULL));
     count = rand() % 10 + 5;
@@ -403,40 +410,31 @@ int main(const int argc, const char** argv)
         int *var = NULL;
         if (!strcmp(argv[i], "-w")) {
             var = &width;
-        } 
-        else if (!strcmp(argv[i], "-h")) {
+        } else if (!strcmp(argv[i], "-h")) {
             var = &height;
-        }
-        else if (argv[i][0] >= '0' && argv[i][0] <= '9') {
+        } else if (argv[i][0] >= '0' && argv[i][0] <= '9') {
             count = atoi(argv[i]);
-        }
-        else {
-            fprintf(stderr, "%s: illegal option '%s'\n", argv[0], argv[i]);
-            return EXIT_FAILURE;
+        } else {
+            return gsim_error("illegal option '%s'\n", argv[0], argv[i]);
         }
 
         if (var) {
             if (i + 1 == argc) {
-                fprintf(
-                    stderr,
-                    "%s: expected numeric argument after option '%s'\n",
+                return gsim_error(
+                    "expected numeric argument afte '%s' option\n",
                     argv[0],
                     argv[i]
                 );
-                return EXIT_FAILURE;
             }
             
             *var = atoi(argv[i + 1]);
             if (*var < 1) {
-                fprintf(
-                    stderr,
-                    "%s: argument for option '%s' must be a non-zero unsigned integer\n",
+                return gsim_error(
+                    "argument for option '%s' must be a non-zero unsigned integer\n",
                     argv[0],
                     argv[i]
                 );
-                return EXIT_FAILURE;
             }
-            
             ++i;
         }
     }
@@ -451,7 +449,6 @@ int main(const int argc, const char** argv)
         dT = T - t;
         t = T;
 
-        //printf("%f\n", dT);
         const float dM = dT * 100.0F;
         const vec2 m = mouse_position();
         const int clicked = spxeMouseDown(LEFT);
@@ -460,8 +457,8 @@ int main(const int argc, const char** argv)
             break;
         }
         if (spxeKeyPressed(R)) {
-            cam.x = 0;
-            cam.y = 0;
+            cam.x = 0.0F;
+            cam.y = 0.0F;
             scale = 1.0F;
             universe_spawn(&universe);
         }
@@ -515,7 +512,6 @@ int main(const int argc, const char** argv)
         }
 
         memcpy(pixbuf, sky, spxe.scrres.width * spxe.scrres.height * sizeof(Px));
-        
         if (trail) {
             universe_dust_render(&universe, pixbuf, cam, scale);
         }
