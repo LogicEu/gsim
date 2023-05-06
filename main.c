@@ -439,13 +439,14 @@ static void gsim_controls(void)
     fprintf(stdout, "gsim controls:\n");
     fprintf(stdout, "Click and drag on the background to move around.\n");
     fprintf(stdout, "Click and drag on the bodies of the simulation to move them.\n");
-    fprintf(stdout, "WASD: Move up, down, left and right.\n");
-    fprintf(stdout, "Z and X: Zoom in and out of the center of the screen.\n");
-    fprintf(stdout, "O and P: Increase and decrease the size of the time step.\n");
-    fprintf(stdout, "Space: Pause the time of the physics in the simulation.\n");
-    fprintf(stdout, "Left Shift: Switch the rendering of trails on and off.\n");
-    fprintf(stdout, "R: Restart the simulation.\n");
-    fprintf(stdout, "Escape: Quit.\n");
+    fprintf(stdout, "WASD:\tMove up, down, left and right.\n");
+    fprintf(stdout, "Z - X:\tZoom in and out of the center of the screen.\n");
+    fprintf(stdout, "O - P:\tIncrease and decrease the size of the time step.\n");
+    fprintf(stdout, "G:\tTurn gravity on and off.\n");
+    fprintf(stdout, "Space:\tPause the time of the physics in the simulation.\n");
+    fprintf(stdout, "LShift:\tSwitch the rendering of trails on and off.\n");
+    fprintf(stdout, "R:\tRestart the simulation.\n");
+    fprintf(stdout, "Escape:\tQuit.\n");
 }
 
 int main(const int argc, const char** argv)
