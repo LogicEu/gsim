@@ -4,7 +4,7 @@
 > collisions and provides fun interactions you can play with. Built on top of my 
 > rendering engine, the [simple pixel engine](https://github.com/LogicEu/spxe.git).
 
-![alt text](https://github.com/LogicEu/gsim/blob/main/image.jpeg?raw=true)
+![alt text](https://github.com/LogicEu/gsim/blob/main/image.png?raw=true)
 
 ## Third Party
 
