@@ -6,6 +6,27 @@
 
 ![alt text](https://github.com/LogicEu/gsim/blob/main/image.png?raw=true)
 
+## Controls
+
+> Click and drag the mouse on top of the background to move the camera.
+> Click and drag on the bodies to move them.
+
+| Key | Action |
+| --- | --- |
+| W | Move camera up |
+| S | Move camera down |
+| D | Move camera to the right |
+| A | Move camera to the left |
+| Z | Zoom in |
+| X | Zoom out |
+| O | Decrease size of physics time step |
+| P | Increase size of physics time step |
+| G | Turn gravity on and off |
+| Space | Pause the time of the physics in the simulation |
+| LShift | Switch the rendering of trails on and off |
+| R | Restart the simulation |
+| Escape | Quit |
+
 ## Third Party
 
 > [spxe](https://github.com/LogicEu/spxe.git) depends on OpenGL libraries to manage

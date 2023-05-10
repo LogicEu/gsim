@@ -41,6 +41,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define SUBSCALE 2
 #define DUST_POOL_SIZE 100
 #define G 0.0667F
+#define S 0.0F
 #define MASS_MIN 1.0F
 #define MASS_MAX 1.0F
 
@@ -132,14 +133,13 @@ static int universe_spawn_collision(const struct universe* universe, const size_
     }
     return 0;
 }
-
-static void universe_spawn(struct universe* universe)
+static void universe_spawn(struct universe* universe, const float speed)
 {
     const size_t count = universe->count;
     int width = spxe.scrres.width, height = spxe.scrres.height;
+    const vec2 hscr = {(float)width * 0.5F, (float)height * 0.5F};
     const float scale = (float)(width < height ? width : height) / 30.0F;
     const float minr = scale * MASS_MIN, maxr = scale * MASS_MAX;
-    memset(universe->velocities, 0, sizeof(vec2) * universe->count);
     for (size_t i = 0; i < count; ++i) {
         float n = 1.0F;
         universe->positions[i].x = frand() * (float)width;
@@ -153,6 +153,11 @@ static void universe_spawn(struct universe* universe)
             n = m;
         }
 
+        universe->velocities[i] = (vec2){
+            -(hscr.y - universe->positions[i].y) * speed,
+            (hscr.x - universe->positions[i].x) * speed
+        };
+
         universe->sqradiuses[i] = universe->radiuses[i] * universe->radiuses[i];
         universe->colors[i].r = rand() % 256;
         universe->colors[i].g = rand() % 256;
@@ -162,7 +167,7 @@ static void universe_spawn(struct universe* universe)
     }
 }
 
-static struct universe universe_create(const size_t count)
+static struct universe universe_create(const size_t count, const float speed)
 {
     struct universe universe;
     universe.count = count;
@@ -172,7 +177,7 @@ static struct universe universe_create(const size_t count)
     universe.sqradiuses = malloc(count * sizeof(float));
     universe.colors = malloc(count * sizeof(Px));
     universe.dusts = calloc(count, sizeof(struct dust));
-    universe_spawn(&universe);
+    universe_spawn(&universe, speed);
     return universe;
 }
 
@@ -208,18 +213,22 @@ static void universe_apply_gravity(const struct universe* universe, const float 
 static void universe_collision_check(
     const struct universe* universe, const float dT, const size_t i)
 {
+    vec2 q;
+    size_t j;
+    int found = 0;
     const float R = universe->radiuses[i];
     const vec2 P = vec2_delta(universe->positions[i], universe->velocities[i], dT);
-    for (size_t j = 0; j < universe->count; ++j) {
-        if (i == j) {
-            continue;
+    for (j = 0; j < universe->count; ++j) {
+        if (i != j) {
+            q = vec2_delta(universe->positions[j], universe->velocities[j], dT);
+            if (circle_overlap(P, q, R, universe->radiuses[j])) {
+                ++found;
+                break;
+            }
         }
+    }
 
-        vec2 q = vec2_delta(universe->positions[j], universe->velocities[j], dT);
-        if (!circle_overlap(P, q, R, universe->radiuses[j])) {
-            continue;
-        }
-        
+    if (found) {
         const float mass = universe->sqradiuses[i] + universe->sqradiuses[j];
         const float dx = q.x - P.x;
         const float dy = q.y - P.y;
@@ -227,7 +236,7 @@ static void universe_collision_check(
         const vec2 n = {dx / d, dy / d};
         const float p = (universe->velocities[i].x * n.x + 
             universe->velocities[i].y * n.y - universe->velocities[j].x * n.x
-            - universe->velocities[j].y * n.y) * 2.0F / mass;
+            - universe->velocities[j].y * n.y) * 1.98F / mass;
 
         universe->velocities[i].x -= p * universe->sqradiuses[j] * n.x;
         universe->velocities[i].y -= p * universe->sqradiuses[j] * n.y;
@@ -236,7 +245,7 @@ static void universe_collision_check(
 
         vec2 c1 = vec2_delta(universe->positions[i], universe->velocities[i], dT); 
         vec2 c2 = vec2_delta(universe->positions[j], universe->velocities[j], dT); 
-
+        
         if (circle_overlap(c1, c2, universe->radiuses[i], universe->radiuses[j])) {
             float r = R + universe->radiuses[j];
             float k1 = R / r;
@@ -244,15 +253,14 @@ static void universe_collision_check(
             vec2 d = {c2.x - c1.x, c2.y - c1.y};
             vec2 n = vec2_norm(d);
             vec2 v = {d.x - n.x * r, d.y - n.y * r};
-            universe->velocities[i].x = k1 * v.x / dT;
-            universe->velocities[i].y = k1 * v.y / dT;
-            universe->velocities[j].x = -k2 * v.x / dT;
-            universe->velocities[j].y = -k2 * v.y / dT;
+            universe->positions[i].x += k1 * v.x;
+            universe->positions[i].y += k1 * v.y;
+            universe->positions[j].x -= k2 * v.x;
+            universe->positions[j].y -= k2 * v.y;
         } else {
             universe_collision_check(universe, dT, j);
             universe_collision_check(universe, dT, i);
-        }   
-        break;
+        }
     }
 }
 
@@ -265,7 +273,7 @@ static void universe_update(
             universe_collision_check(universe, dT, i);
         }
     }
-
+    
     for (size_t i = 0; i < universe->count; ++i) { 
         if (h != i) {
             universe->positions[i].x += universe->velocities[i].x * dT;
@@ -425,28 +433,29 @@ static int gsim_error(const char* fmt, const char* arg)
 
 static int gsim_help(void)
 {
-    fprintf(stdout, "gsim usage:\n");
-    fprintf(stdout, "<uint>\t\t: Set number of bodies to simulate in the system.\n");
-    fprintf(stdout, "-g <float>\t: Set gravitational constant value.\n");
-    fprintf(stdout, "-w <uint>\t: Set width of the rendered simulation in pixels.\n");
-    fprintf(stdout, "-h <uint>\t: Set height of the rendered simulation in pixels.\n");
-    fprintf(stdout, "-help\t\t: Print information about usage of gsim.\n");
+    printf("gsim usage:\n");
+    printf("<uint>\t\t: Set number of bodies to simulate in the system.\n");
+    printf("-w <uint>\t: Set width of the rendered simulation in pixels.\n");
+    printf("-h <uint>\t: Set height of the rendered simulation in pixels.\n");
+    printf("-g <float>\t: Set gravitational constant value. Default is %f\n", G);
+    printf("-s <float>\t: Set initial angular speed of the system. Default is %f\n", S);
+    printf("-help\t\t: Print information about usage of gsim.\n");
     return EXIT_SUCCESS;
 }
 
 static void gsim_controls(void)
 {
-    fprintf(stdout, "gsim controls:\n");
-    fprintf(stdout, "Click and drag on the background to move around.\n");
-    fprintf(stdout, "Click and drag on the bodies of the simulation to move them.\n");
-    fprintf(stdout, "WASD:\tMove up, down, left and right.\n");
-    fprintf(stdout, "Z - X:\tZoom in and out of the center of the screen.\n");
-    fprintf(stdout, "O - P:\tIncrease and decrease the size of the time step.\n");
-    fprintf(stdout, "G:\tTurn gravity on and off.\n");
-    fprintf(stdout, "Space:\tPause the time of the physics in the simulation.\n");
-    fprintf(stdout, "LShift:\tSwitch the rendering of trails on and off.\n");
-    fprintf(stdout, "R:\tRestart the simulation.\n");
-    fprintf(stdout, "Escape:\tQuit.\n");
+    printf("gsim controls:\n");
+    printf("Click and drag on the background to move around.\n");
+    printf("Click and drag on the bodies of the simulation to move them.\n");
+    printf("WASD:\tMove up, down, left and right.\n");
+    printf("Z - X:\tZoom in and out of the center of the screen.\n");
+    printf("O - P:\tIncrease and decrease the size of the time step.\n");
+    printf("G:\tTurn gravity on and off.\n");
+    printf("Space:\tPause the time of the physics in the simulation.\n");
+    printf("LShift:\tSwitch the rendering of trails on and off.\n");
+    printf("R:\tRestart the simulation.\n");
+    printf("Escape:\tQuit.\n");
 }
 
 int main(const int argc, const char** argv)
@@ -455,7 +464,7 @@ int main(const int argc, const char** argv)
     struct universe universe;
     int i, count, width = WIDTH, height = HEIGHT;
     int gravity = 1, paused = 0, hover = -1, trail = 1;
-    float t, T, dT, dK = 1.0F, scale = 1.0F, g = G;
+    float t, T, dT, dK = 1.0F, scale = 1.0F, g = G, speed = S;
     vec2 cam = {0.0F, 0.0F}, mouse = {0.0F, 0.0F};
     
     srand(time(NULL));
@@ -472,6 +481,8 @@ int main(const int argc, const char** argv)
             inum = &height;
         } else if (!strcmp(argv[i], "-g")) {
             fnum = &g;
+        } else if (!strcmp(argv[i], "-s")) {
+            fnum = &speed;
         } else if (argv[i][0] >= '0' && argv[i][0] <= '9') {
             count = atoi(argv[i]);
         } else {
@@ -501,7 +512,7 @@ int main(const int argc, const char** argv)
     }
 
     pixbuf = spxeStart("gsim", WIDTH, HEIGHT, width, height);
-    universe = universe_create(count);
+    universe = universe_create(count, speed);
     sky = universe_background_create(1000, 2);
     gsim_controls();
 
@@ -522,7 +533,7 @@ int main(const int argc, const char** argv)
             cam.x = 0.0F;
             cam.y = 0.0F;
             scale = 1.0F;
-            universe_spawn(&universe);
+            universe_spawn(&universe, speed);
         }
         if (spxeKeyPressed(G)) {
             gravity = !gravity;
