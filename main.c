@@ -133,6 +133,7 @@ static int universe_spawn_collision(const struct universe* universe, const size_
     }
     return 0;
 }
+
 static void universe_spawn(struct universe* universe, const float speed)
 {
     const size_t count = universe->count;
@@ -197,14 +198,17 @@ static void universe_free(struct universe* universe)
 static void universe_apply_gravity(const struct universe* universe, const float g)
 {
     for (size_t i = 0; i < universe->count; ++i) {
-        for (size_t j = 0; j < universe->count; ++j) {
-            if (i != j) {
-                const float dx = universe->positions[i].x - universe->positions[j].x;
-                const float dy = universe->positions[i].y - universe->positions[j].y;
-                const float sqr = dx * dx + dy * dy;
-                const float f = g * universe->sqradiuses[j] / sqr;
-                universe->velocities[i].x -= f * dx;
-                universe->velocities[i].y -= f * dy;
+        for (size_t j = i + 1; j < universe->count; ++j) {
+            const float dx = universe->positions[i].x - universe->positions[j].x;
+            const float dy = universe->positions[i].y - universe->positions[j].y;
+            if (dx != 0.0F && dy != 0.0F) {
+                const float f = g / (dx * dx + dy * dy);
+                const float fi = f * universe->sqradiuses[j];
+                const float fj = f * universe->sqradiuses[i];
+                universe->velocities[i].x -= fi * dx;
+                universe->velocities[i].y -= fi * dy;
+                universe->velocities[j].x += fj * dx;
+                universe->velocities[j].y += fj * dy;
             }
         }
     }
@@ -385,18 +389,20 @@ static int universe_render(
         float sqr = r * r;
         vec2 p = {universe->positions[i].x - cam.x, universe->positions[i].y - cam.y};
         vec2 q = {hres.x + (hres.x - p.x) * scale, hres.y + (hres.y - p.y) * scale};
-        if (mouse_overlap == -1 && circle_point_overlap(q, mouse, sqr)) {
-            float t = r - 2.0F;
-            Px n = {
-                255 - universe->colors[i].r, 
-                255 - universe->colors[i].g,
-                255 - universe->colors[i].b, 
-                255
-            };
-            circle_render_subsample_traced(pixbuf, q, r, sqr, n, t * t);
-            mouse_overlap = i;
-        } else {
-            circle_render_subsample(pixbuf, q, r, sqr,  universe->colors[i]);
+        if (q.x + r > 0.0F && q.y + r > 0.0F && q.x - r < (float)w && q.y - r < (float)h){
+            if (mouse_overlap == -1 && circle_point_overlap(q, mouse, sqr)) {
+                float t = r - 2.0F;
+                Px n = {
+                    255 - universe->colors[i].r, 
+                    255 - universe->colors[i].g,
+                    255 - universe->colors[i].b, 
+                    255
+                };
+                circle_render_subsample_traced(pixbuf, q, r, sqr, n, t * t);
+                mouse_overlap = i;
+            } else {
+                circle_render_subsample(pixbuf, q, r, sqr,  universe->colors[i]);
+            }
         }
     }
     return mouse_overlap;
@@ -521,7 +527,7 @@ int main(const int argc, const char** argv)
         T = spxeTime();
         dT = T - t;
         t = T;
-
+        
         const float dM = dT * 100.0F;
         const vec2 m = mouse_position();
         const int clicked = spxeMouseDown(LEFT);
