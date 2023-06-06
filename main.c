@@ -80,16 +80,20 @@ struct Trail {
     int marker;
 };
 
+struct Body {
+    vec2 p;
+    vec2 v;
+    float r;
+    float sqr;
+    Px color;
+    struct QuadNode* nodes[4];
+    struct Trail trail;
+};
+
 struct Universe {
     size_t count;
-    vec2* positions;
-    vec2* velocities;
-    struct Trail* trails;
-    float* radiuses;
-    float* sqradiuses;
-    Px* colors;
+    struct Body* bodies;
     struct QuadTree quadtree;
-    struct QuadNode** nodes;
 };
 
 static float frand(void)
@@ -177,12 +181,11 @@ static int rect_overlap(const Rect r1, const Rect r2)
             (r1.p.y - r1.q.y) >= (r2.p.y + r2.q.y));
 }
 
-static int universe_spawn_collision(const struct Universe* universe, const size_t index)
+static int universe_spawn_collision(
+    const struct Universe* universe, const vec2 p, const float r, const size_t index)
 {
-    const float r = universe->radiuses[index];
-    const vec2 p = universe->positions[index];
     for (size_t i = 0; i < index; ++i) {
-        if (circle_overlap(p, universe->positions[i], r, universe->radiuses[i])) {
+        if (circle_overlap(p, universe->bodies[i].p, r, universe->bodies[i].r)) {
             return 1;
         }
     }
@@ -192,36 +195,37 @@ static int universe_spawn_collision(const struct Universe* universe, const size_
 static float universe_spawn(struct Universe* universe, const float speed)
 {
     float ret = 0.0F;
-    int width = spxe.scrres.width, height = spxe.scrres.height;
+    const int width = spxe.scrres.width, height = spxe.scrres.height;
     const vec2 hscr = {(float)width * 0.5F, (float)height * 0.5F};
     const float scale = (float)(width < height ? width : height) / 30.0F;
     const float minr = scale * MASS_MIN, maxr = scale * MASS_MAX;
     const size_t count = universe->count;
     for (size_t i = 0; i < count; ++i) {
         float n = 1.0F;
-        universe->positions[i].x = frand() * (float)width;
-        universe->positions[i].y = frand() * (float)height;
-        universe->radiuses[i] = minr + frand() * maxr;
-        while (universe_spawn_collision(universe, i)) {
+        universe->bodies[i].p.x = frand() * (float)width;
+        universe->bodies[i].p.y = frand() * (float)height;
+        universe->bodies[i].r = minr + frand() * maxr;
+        while (universe_spawn_collision(
+            universe, universe->bodies[i].p, universe->bodies[i].r, i)) {
             float m = n * 2.0F;
-            universe->positions[i].x = (m * frand() - n + 0.5F) * (float)width;
-            universe->positions[i].y = (m * frand() - n + 0.5F) * (float)height;
-            universe->radiuses[i] = minr + frand() * maxr;
+            universe->bodies[i].p.x = (m * frand() - n + 0.5F) * (float)width;
+            universe->bodies[i].p.y = (m * frand() - n + 0.5F) * (float)height;
+            universe->bodies[i].r = minr + frand() * maxr;
             n = m;
         }
         
         ret = n > ret ? n : ret;
-        universe->velocities[i] = (vec2){
-            -(hscr.y - universe->positions[i].y) * speed,
-            (hscr.x - universe->positions[i].x) * speed
+        universe->bodies[i].v = (vec2){
+            -(hscr.y - universe->bodies[i].p.y) * speed,
+            (hscr.x - universe->bodies[i].p.x) * speed
         };
 
-        universe->sqradiuses[i] = universe->radiuses[i] * universe->radiuses[i];
-        universe->colors[i].r = rand() % 256;
-        universe->colors[i].g = rand() % 256;
-        universe->colors[i].b = rand() % 256;
-        universe->colors[i].a = 255;
-        memset(universe->trails + i, 0, sizeof(struct Trail));
+        universe->bodies[i].sqr = universe->bodies[i].r * universe->bodies[i].r;
+        universe->bodies[i].color.r = rand() % 256;
+        universe->bodies[i].color.g = rand() % 256;
+        universe->bodies[i].color.b = rand() % 256;
+        universe->bodies[i].color.a = 255;
+        memset(&universe->bodies[i].trail, 0, sizeof(struct Trail));
     }
 
     return ret;
@@ -292,6 +296,39 @@ static void quadarray_remove_if(struct QuadArray* qarray, const size_t element)
     }
 }
 
+static void body_node_push(struct Body* body, struct QuadNode* node)
+{
+    for (size_t i = 0; i < 4; ++i) {
+        if (!body->nodes[i]) {
+            body->nodes[i] = node;
+            break;
+        } else if (body->nodes[i] == node) {
+            break;
+        }
+    }
+}
+
+static void body_node_remove(struct Body* body, const struct QuadNode* node)
+{
+    if (body->nodes[3] == node) {
+        body->nodes[3] = NULL;
+    } else {
+        for (size_t i = 0; i < 3; ++i) {
+            if (body->nodes[i] == node) {
+                memmove(
+                    body->nodes + i,
+                    body->nodes + i + 1,
+                    (3 - i) * sizeof(struct QuadNode*)
+                );
+                body->nodes[3] = NULL;
+                break;
+            }
+        }
+    }
+}
+
+static void quadnode_push(struct QuadNode*, struct Universe*, size_t);
+
 static struct QuadNode quadnode_create(const vec2 p, const vec2 q)
 {
     struct QuadNode qnode;
@@ -314,35 +351,6 @@ static void quadnode_free(struct QuadNode* qnode)
     }
 }
 
-static void nodepush(struct QuadNode** nodes, struct QuadNode* node)
-{
-    for (size_t i = 0; i < 4; ++i) {
-        if (!nodes[i]) {
-            nodes[i] = node;
-            break;
-        } else if (nodes[i] == node) {
-            break;
-        }
-    }
-}
-
-static void noderemove(struct QuadNode** nodes, const struct QuadNode* node)
-{
-    if (nodes[3] == node) {
-        nodes[3] = NULL;
-    } else {
-        for (size_t i = 0; i < 3; ++i) {
-            if (nodes[i] == node) {
-                memmove(nodes + i, nodes + i + 1, (3 - i) * sizeof(struct QuadNode*));
-                nodes[3] = NULL;
-                break;
-            }
-        }
-    }
-}
-
-static void quadnode_push(struct QuadNode*, struct Universe*, size_t);
-
 static void quadnode_split(struct QuadNode* qnode, struct Universe* universe)
 {
     if (!qnode->children) {
@@ -357,11 +365,11 @@ static void quadnode_split(struct QuadNode* qnode, struct Universe* universe)
     
     while (qnode->elements.size) {
         const size_t k = qnode->elements.indices[--qnode->elements.size];
-        noderemove(universe->nodes + k * 4, qnode);
+        body_node_remove(universe->bodies +  k, qnode);
         for (int i = 0; i < 4; ++i) {
             qnode->children[i].active = 1;
             if (rect_circle_overlap(qnode->children[i].rect, 
-                universe->positions[k], universe->radiuses[k])) {
+                universe->bodies[k].p, universe->bodies[k].r)) {
                 quadnode_push(qnode->children + i, universe, k);
             }
         }
@@ -378,8 +386,7 @@ static void quadnode_merge(struct QuadNode* qnode, struct Universe* universe)
         child->active = 0;
         while (child->elements.size) {
             const size_t k = child->elements.indices[--child->elements.size];
-            const size_t n = k * 4;
-            noderemove(universe->nodes + n, child);
+            body_node_remove(universe->bodies + k, child);
             quadnode_push(qnode, universe, k);
         }
     }
@@ -408,8 +415,8 @@ static void quadnode_reduce(struct QuadNode* qnode, struct Universe* universe)
 static void quadnode_push(
     struct QuadNode* qnode, struct Universe* universe, size_t index)
 {
-    const float r = universe->radiuses[index];
-    const vec2 p = universe->positions[index];
+    const float r = universe->bodies[index].r;
+    const vec2 p = universe->bodies[index].p;
     if (!qnode->active && qnode->children) {
         for (int i = 0; i < 4; ++i) {
             if (rect_circle_overlap(qnode->children[i].rect, p, r)) {
@@ -422,7 +429,7 @@ static void quadnode_push(
         quadnode_push(qnode, universe, index);
     } else {
         quadarray_push_if(&qnode->elements, index);
-        nodepush(universe->nodes + index * 4, qnode);
+        body_node_push(universe->bodies + index, qnode);
     }
 }
 
@@ -447,12 +454,12 @@ static void quadtree_push(
     struct QuadTree* quadtree, struct Universe* universe, size_t index)
 {
     if (rect_circle_outside(
-        quadtree->root->rect, universe->positions[index], universe->radiuses[index])) {
+        quadtree->root->rect, universe->bodies[index].p, universe->bodies[index].r)) {
         quadarray_push_if(&quadtree->outsiders, index);
     }
 
     if (rect_circle_overlap(
-        quadtree->root->rect, universe->positions[index], universe->radiuses[index])) {
+        quadtree->root->rect, universe->bodies[index].p, universe->bodies[index].r)) {
         quadnode_push(quadtree->root, universe, index);
     }
 }
@@ -465,9 +472,9 @@ static size_t quadarray_collision_check(const struct QuadArray* qarray,
         const size_t n = qarray->indices[i];
         if (n != index) {
             const vec2 q = vec2_delta(
-                universe->positions[n], universe->velocities[n], dT
+                universe->bodies[n].p, universe->bodies[n].v, dT
             );
-            if (circle_overlap(p, q, r, universe->radiuses[n])) {
+            if (circle_overlap(p, q, r, universe->bodies[n].r)) {
                 return n;
             }
         } 
@@ -536,13 +543,7 @@ static struct Universe universe_create(const size_t count, const float speed)
 {
     struct Universe universe;
     universe.count = count;
-    universe.positions = malloc(count * sizeof(vec2));
-    universe.velocities = calloc(count, sizeof(vec2));
-    universe.radiuses = malloc(count * sizeof(float));
-    universe.sqradiuses = malloc(count * sizeof(float));
-    universe.colors = malloc(count * sizeof(Px));
-    universe.trails = calloc(count, sizeof(struct Trail));
-    universe.nodes = calloc(count * 4, sizeof(struct QuadNode*));
+    universe.bodies = calloc(count, sizeof(*universe.bodies));
     const float n = universe_spawn(&universe, speed);
     universe.quadtree = universe_quadtree_create(&universe, n);
     return universe;
@@ -551,13 +552,7 @@ static struct Universe universe_create(const size_t count, const float speed)
 static void universe_free(struct Universe* universe)
 {
     if (universe->count) {
-        free(universe->positions);
-        free(universe->velocities);
-        free(universe->radiuses);
-        free(universe->sqradiuses);
-        free(universe->colors);
-        free(universe->trails);
-        free(universe->nodes);
+        free(universe->bodies);
         quadtree_free(&universe->quadtree);
         memset(universe, 0, sizeof(struct Universe));
     }
@@ -567,16 +562,16 @@ static void universe_apply_gravity(const struct Universe* universe, const float 
 {
     for (size_t i = 0; i < universe->count; ++i) {
         for (size_t j = i + 1; j < universe->count; ++j) {
-            const float dx = universe->positions[i].x - universe->positions[j].x;
-            const float dy = universe->positions[i].y - universe->positions[j].y;
+            const float dx = universe->bodies[i].p.x - universe->bodies[j].p.x;
+            const float dy = universe->bodies[i].p.y - universe->bodies[j].p.y;
             if (dx != 0.0F && dy != 0.0F) {
                 const float f = g / (dx * dx + dy * dy);
-                const float fi = f * universe->sqradiuses[j];
-                const float fj = f * universe->sqradiuses[i];
-                universe->velocities[i].x -= fi * dx;
-                universe->velocities[i].y -= fi * dy;
-                universe->velocities[j].x += fj * dx;
-                universe->velocities[j].y += fj * dy;
+                const float fi = f * universe->bodies[j].sqr;
+                const float fj = f * universe->bodies[i].sqr;
+                universe->bodies[i].v.x -= fi * dx;
+                universe->bodies[i].v.y -= fi * dy;
+                universe->bodies[j].v.x += fj * dx;
+                universe->bodies[j].v.y += fj * dy;
             }
         }
     }
@@ -585,40 +580,40 @@ static void universe_apply_gravity(const struct Universe* universe, const float 
 static void universe_collision_check(
     const struct Universe* universe, const size_t i, const float dT)
 {
-    const float r = universe->radiuses[i];
-    const vec2 p = vec2_delta(universe->positions[i], universe->velocities[i], dT);
+    const float r = universe->bodies[i].r;
+    const vec2 p = vec2_delta(universe->bodies[i].p, universe->bodies[i].v, dT);
     const size_t j = quadtree_collision_check(universe, i, p, r, dT);
 
     if (j != (size_t)-1) {
-        const vec2 q = vec2_delta(universe->positions[j], universe->velocities[j], dT);
-        const float mass = universe->sqradiuses[i] + universe->sqradiuses[j];
+        const vec2 q = vec2_delta(universe->bodies[j].p, universe->bodies[j].v, dT);
+        const float mass = universe->bodies[i].sqr + universe->bodies[j].sqr;
         const float dx = q.x - p.x;
         const float dy = q.y - p.y;
         const float d = sqrtf(dx * dx + dy * dy);
         const vec2 n = {dx / d, dy / d};
-        const float P = (universe->velocities[i].x * n.x + 
-            universe->velocities[i].y * n.y - universe->velocities[j].x * n.x
-            - universe->velocities[j].y * n.y) * 1.98F / mass;
+        const float P = (universe->bodies[i].v.x * n.x + 
+            universe->bodies[i].v.y * n.y - universe->bodies[j].v.x * n.x
+            - universe->bodies[j].v.y * n.y) * 1.98F / mass;
 
-        universe->velocities[i].x -= P * universe->sqradiuses[j] * n.x;
-        universe->velocities[i].y -= P * universe->sqradiuses[j] * n.y;
-        universe->velocities[j].x += P * universe->sqradiuses[i] * n.x;
-        universe->velocities[j].y += P * universe->sqradiuses[i] * n.y;
+        universe->bodies[i].v.x -= P * universe->bodies[j].sqr * n.x;
+        universe->bodies[i].v.y -= P * universe->bodies[j].sqr * n.y;
+        universe->bodies[j].v.x += P * universe->bodies[i].sqr * n.x;
+        universe->bodies[j].v.y += P * universe->bodies[i].sqr * n.y;
 
-        vec2 c1 = vec2_delta(universe->positions[i], universe->velocities[i], dT); 
-        vec2 c2 = vec2_delta(universe->positions[j], universe->velocities[j], dT); 
+        vec2 c1 = vec2_delta(universe->bodies[i].p, universe->bodies[i].v, dT); 
+        vec2 c2 = vec2_delta(universe->bodies[j].p, universe->bodies[j].v, dT); 
         
-        if (circle_overlap(c1, c2, universe->radiuses[i], universe->radiuses[j])) {
-            float R = r + universe->radiuses[j];
+        if (circle_overlap(c1, c2, universe->bodies[i].r, universe->bodies[j].r)) {
+            float R = r + universe->bodies[j].r;
             float k1 = r / R;
             float k2 = 1.0F - k1;
             vec2 d = {c2.x - c1.x, c2.y - c1.y};
             vec2 n = vec2_norm(d);
             vec2 v = {d.x - n.x * R, d.y - n.y * R};
-            universe->positions[i].x += k1 * v.x;
-            universe->positions[i].y += k1 * v.y;
-            universe->positions[j].x -= k2 * v.x;
-            universe->positions[j].y -= k2 * v.y;
+            universe->bodies[i].p.x += k1 * v.x;
+            universe->bodies[i].p.y += k1 * v.y;
+            universe->bodies[j].p.x -= k2 * v.x;
+            universe->bodies[j].p.y -= k2 * v.y;
         } else {
             universe_collision_check(universe, j, dT);
             universe_collision_check(universe, i, dT);
@@ -638,21 +633,20 @@ static void universe_update(
     
     for (size_t i = 0; i < universe->count; ++i) { 
         if (h != i) {
-            universe->positions[i].x += universe->velocities[i].x * dT;
-            universe->positions[i].y += universe->velocities[i].y * dT;
+            universe->bodies[i].p.x += universe->bodies[i].v.x * dT;
+            universe->bodies[i].p.y += universe->bodies[i].v.y * dT;
         }
         
-        const size_t n = i * 4;
-        for (size_t j = 0; j < 4 && universe->nodes[n + j]; ++j) {
-            if (!rect_circle_overlap(universe->nodes[n + j]->rect, 
-                universe->positions[i], universe->radiuses[i])) {
-                quadarray_remove_if(&universe->nodes[n + j]->elements, i);
-                noderemove(universe->nodes + n, universe->nodes[n + j]);
+        for (size_t j = 0; j < 4 && universe->bodies[i].nodes[j]; ++j) {
+            if (!rect_circle_overlap(universe->bodies[i].nodes[j]->rect,
+                universe->bodies[i].p, universe->bodies[i].r)) {
+                quadarray_remove_if(&universe->bodies[i].nodes[j]->elements, i);
+                body_node_remove(universe->bodies + i, universe->bodies[i].nodes[j]);
             }
         }
         quadtree_push(&universe->quadtree, universe, i);
     }
-
+    
     if (universe->quadtree.root->children) {
         quadnode_reduce(universe->quadtree.root, universe);
     }
@@ -742,9 +736,9 @@ static void universe_trails_render(
     const vec2 hres = {(float)w * 0.5F, (float)h * 0.5F};
     for (size_t i = 0; i < universe->count; ++i) { 
         for (size_t j = 0; j < DUST_POOL_SIZE; ++j) {
-            if (universe->trails[i].timers[j] > 0.0F) {
+            if (universe->bodies[i].trail.timers[j] > 0.0F) {
                 const vec2 dq = vec2_world_to_screen(
-                    universe->trails[i].positions[j], cam, hres, scale
+                    universe->bodies[i].trail.positions[j], cam, hres, scale
                 );
                 
                 const int x = (int)dq.x;
@@ -752,16 +746,16 @@ static void universe_trails_render(
                 if (x >= 0 && y >= 0 && x < w && y < h) {
                     pixbuf[y * w + x] = pxlerp(
                         pixbuf[y * w + x],
-                        universe->colors[i],
-                        universe->trails[i].timers[j]
+                        universe->bodies[i].color,
+                        universe->bodies[i].trail.timers[j]
                     );
                 }
-                universe->trails[i].timers[j] -= 1.0F / (float)DUST_POOL_SIZE;
+                universe->bodies[i].trail.timers[j] -= 1.0F / (float)DUST_POOL_SIZE;
             }
         }
-        universe->trails[i].positions[universe->trails[i].marker] = universe->positions[i];
-        universe->trails[i].timers[universe->trails[i].marker] = 1.0F;
-        universe->trails[i].marker = (universe->trails[i].marker + 1) % DUST_POOL_SIZE;
+        universe->bodies[i].trail.positions[universe->bodies[i].trail.marker] = universe->bodies[i].p;
+        universe->bodies[i].trail.timers[universe->bodies[i].trail.marker] = 1.0F;
+        universe->bodies[i].trail.marker = (universe->bodies[i].trail.marker + 1) % DUST_POOL_SIZE;
     }
 }
 
@@ -788,22 +782,22 @@ static int universe_render(
     const int w = spxe.scrres.width, h = spxe.scrres.height;
     const vec2 hres = {(float)w * 0.5F, (float)h * 0.5F};
     for (size_t i = 0; i < universe->count; ++i) { 
-        float r = universe->radiuses[i] * scale;
+        float r = universe->bodies[i].r * scale;
         float sqr = r * r;
-        const vec2 q = vec2_world_to_screen(universe->positions[i], cam, hres, scale);
+        const vec2 q = vec2_world_to_screen(universe->bodies[i].p, cam, hres, scale);
         if (q.x + r > 0.0F && q.y + r > 0.0F && q.x - r < (float)w && q.y - r < (float)h){
             if (mouse_overlap == -1 && circle_point_overlap(q, mouse, sqr)) {
                 float t = r - 2.0F;
                 Px n = {
-                    255 - universe->colors[i].r, 
-                    255 - universe->colors[i].g,
-                    255 - universe->colors[i].b, 
+                    255 - universe->bodies[i].color.r, 
+                    255 - universe->bodies[i].color.g,
+                    255 - universe->bodies[i].color.b, 
                     255
                 };
                 circle_render_subsample_traced(pixbuf, q, r, sqr, n, t * t);
                 mouse_overlap = i;
             } else {
-                circle_render_subsample(pixbuf, q, r, sqr,  universe->colors[i]);
+                circle_render_subsample(pixbuf, q, r, sqr,  universe->bodies[i].color);
             }
         }
     }
@@ -961,20 +955,20 @@ int main(const int argc, const char** argv)
         if (clicked) {
             vec2 d = {m.x - mouse.x, m.y - mouse.y};
             if (hover != -1) {
-                vec2 p = universe.positions[hover];
+                vec2 p = universe.bodies[hover].p;
                 vec2 q = {p.x - d.x / scale, p.y - d.y / scale};
-                universe.velocities[hover].x = (q.x - p.x) / (dT * dK);
-                universe.velocities[hover].y = (q.y - p.y) / (dT * dK);
-                universe.positions[hover] = q;
+                universe.bodies[hover].v.x = (q.x - p.x) / (dT * dK);
+                universe.bodies[hover].v.y = (q.y - p.y) / (dT * dK);
+                universe.bodies[hover].p = q;
                 if (spxeKeyDown(V)) {
-                    float r = universe.radiuses[hover] - (dT * dK) * 10.0F;
-                    universe.radiuses[hover] = r > 0.0001 ? r : universe.radiuses[hover];
-                    universe.sqradiuses[hover] = r * r;
+                    float r = universe.bodies[hover].r - (dT * dK) * 10.0F;
+                    universe.bodies[hover].r = r > 0.0001 ? r : universe.bodies[hover].r;
+                    universe.bodies[hover].sqr = r * r;
                 }
                 if (spxeKeyDown(B)) {
-                    float r = universe.radiuses[hover] + (dT * dK) * 10.0F;
-                    universe.radiuses[hover] = r > 0.0001 ? r : universe.radiuses[hover];
-                    universe.sqradiuses[hover] = r * r;
+                    float r = universe.bodies[hover].r + (dT * dK) * 10.0F;
+                    universe.bodies[hover].r = r > 0.0001 ? r : universe.bodies[hover].r;
+                    universe.bodies[hover].sqr = r * r;
                 }
             } else {
                 cam.x += d.x / scale;
@@ -1006,23 +1000,22 @@ int main(const int argc, const char** argv)
         if (spxeKeyDown(O)) {
             dK -= dT;
         }
-
+        
         memcpy(pixbuf, sky, spxe.scrres.width * spxe.scrres.height * sizeof(Px));
         if (trail) {
             universe_trails_render(&universe, pixbuf, cam, scale);
         }
-
         if (!paused) {
             if (gravity) {
                 universe_apply_gravity(&universe, g);
             }
             universe_update(&universe, clicked ? hover : -1, dT * dK);
         }
-
+        
         if (qtree) {
             quadnode_render(universe.quadtree.root, pixbuf, cam, hres, scale);
         }
-
+        
         hover = universe_render(&universe, pixbuf, cam, m, scale);
         mouse = m;
     }
