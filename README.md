@@ -19,11 +19,12 @@
 | A | Move camera to the left |
 | Z | Zoom in |
 | X | Zoom out |
-| O | Decrease size of physics time step |
-| P | Increase size of physics time step |
+| O | Decrease size of physics time step, slow down time |
+| P | Increase size of physics time step, speed up time |
 | G | Turn gravity on and off |
-| Space | Pause the time of the physics in the simulation |
+| Q | Switch the rendering of the quadtree on and off |
 | LShift | Switch the rendering of trails on and off |
+| Space | Pause the time of the physics in the simulation |
 | R | Restart the simulation |
 | Escape | Quit |
 

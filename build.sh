@@ -4,7 +4,7 @@ cc=gcc
 name=gsim
 src=main.c
 std=-std=c99
-opt=-O2
+opt=-O3
 inc=-Ispxe
 opngl=-lglfw
 

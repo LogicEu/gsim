@@ -4,7 +4,7 @@ NAME=gsim
 SRC=main.c
 CC=gcc
 STD=-std=c99
-OPT=-O2
+OPT=-O3
 WFLAGS=-Wall -Wextra -pedantic
 INC=-Ispxe
 LIB=-lglfw
