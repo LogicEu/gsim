@@ -1,8 +1,12 @@
 # gsim
 
 > Toyful and simple 2D N-body simulation of gravitational systems written in C. Handles
-> collisions and provides fun interactions you can play with. Built on top of my 
-> rendering engine, the [simple pixel engine](https://github.com/LogicEu/spxe.git).
+> collisions and provides fun interactions you can play with. It implements the
+> Barnes-Hut approximation algorithm for N-body simulations through the use of a
+> QuadTree data structure, spatialy accelerating collisions and gravity calculations.
+> It runs single threaded and does all computations on the CPU side, even the rendering.
+> Built on top of my rendering engine, 
+> the [simple pixel engine](https://github.com/LogicEu/spxe.git).
 
 ![alt text](https://github.com/LogicEu/gsim/blob/main/image.png?raw=true)
 
